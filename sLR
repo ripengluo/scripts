@@ -1,0 +1,22 @@
+#!/bin/bash
+
+PWD0=`pwd`
+cd scf_interacting/
+for i in alph\+* alph\-*; 
+do cd $i
+sbatch -J `echo $PWD | cut -c 80-` --exclude=$excluded_nodes sub.sh; 
+cd ../
+done
+
+cd alph0
+#DEP=`ls alph0 | grep slurm | cut -c 7-14`
+DEP=$(sbatch -J `echo $PWD | cut -c 100-` sub.sh); DEP=${DEP##* }
+echo $DEP
+cd $PWD0
+cd nscf_bare/
+for i in *; do
+    cd $i
+    sbatch --dependency=afterok:$DEP -J ${PWD##*/} --exclude=$excluded_nodes sub.sh
+    cd ../
+done
+

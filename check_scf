@@ -1,0 +1,7 @@
+#!/bin/bash
+
+for i in `find -name OSZICAR`; 
+do ls -l $i;
+    tail -n 1 $i | grep 1F ;
+    cat $i | grep DAV | tail -n 1 | cut -c 35-48 
+done

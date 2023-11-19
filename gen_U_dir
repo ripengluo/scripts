@@ -1,0 +1,35 @@
+#!/bin/bash
+
+PWD0=`pwd`
+opt_dir=$1
+if [ ${#opt_dir} -gt 1 ] ; then echo "pick optimized structure from" $opt_dir;
+else echo "please input optimization file"; exit; fi
+cd $opt_dir
+PWD1=`pwd`
+temp_dir=~/project_2D_magnetism/template_files
+cd $PWD0
+
+num_ite=`ls | grep LRU |  wc -l`
+echo $num_ite
+
+cp -r $temp_dir/LRU  LRU$num_ite
+cd LRU$num_ite/1_1_1
+PWD2=`pwd`
+for i in `find -name alph*`
+do cd $i
+    ln -s $PWD0/POTCAR ./
+    ln -s $PWD1/CONTCAR ./POSCAR
+    mv sub.sh_cm sub.sh; rm sub.sh_etna
+    cd $PWD2
+done
+    
+cd nscf_bare
+for i in *
+do cd $i
+   ln -s ../../scf_interacting/alph0/CHGCAR ./
+   cd ../
+done
+
+cd $PWD2
+~/scripts/sLR
+

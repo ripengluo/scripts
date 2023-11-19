@@ -1,0 +1,268 @@
+#!/global/home/users/luorp/.conda/envs/abacus_env/bin/python
+
+import numpy as np
+import os
+import sys
+import pymatgen
+from pymatgen.core.structure import Structure
+
+
+##### Specify all the superparameters here  #####
+
+Number_of_shift = 10
+if len(sys.argv) < 2:
+    ifile = "CONTCAR"
+else: ifile =sys.argv[1]
+pwd_dir = os.getcwd()
+root_dir = 'shifted_configuration'
+#os.makedirs(root_dir, exist_ok=True)
+
+##****************************************************************************###
+
+STRU = Structure.from_file(ifile) ## Use pymatgen to read the POSCAR 
+species = STRU.species  ## suggest don't use types_of_species function since order is not preversed
+types = sorted(set(STRU.species), key=STRU.species.index)  ## types of species in POSCAR 
+
+## To get the species number 
+n_per_type = np.zeros(len(types))
+for I ,i_species in enumerate(species):
+    for i, i_type in enumerate(types):
+        if i_species == i_type:
+            n_per_type[i] += 1
+        if i_species == species[-1]:
+            index_ic = I  # GET THE INTERCALATED SPECIES INDEX
+n_per_type = n_per_type.astype(int)
+#print(index_ic)
+
+
+## Initialize POSITION(R)
+R_CART = STRU.cart_coords
+R_FRAC = STRU.frac_coords
+
+## To Find the layer distances: centroid distance and interlayer distance
+## 1. Assume the atoms are not completely random, and first two group are AB2. B has two sublattices.
+
+R_A = R_CART[:n_per_type[0], :] 
+R_B1 = R_CART[n_per_type[0]:int(n_per_type[0] + 0.5*n_per_type[1]), :]
+R_B2 = R_CART[int(n_per_type[0] + 0.5*n_per_type[1]):n_per_type[0] + n_per_type[1], :]
+N_mol = n_per_type[0]
+
+## ordering within sublattice in order to calculate the interlayer distance for convenience,please note that the symmetry would change.
+rank0 = np.argsort(R_A[:, 2]); R_A = R_A[rank0, :]
+rank1 = np.argsort(R_B1[:, 2]); R_B1 = R_B1[rank1, :]
+rank2 = np.argsort(R_B2[:, 2]); R_B2 = R_B2[rank2, :]
+R_B1_up = R_B1[int(0.5*N_mol): N_mol]; R_B1_down = R_B1[:int(0.5*N_mol)]
+R_B2_up = R_B2[int(0.5*N_mol): N_mol]; R_B2_down = R_B2[:int(0.5*N_mol)]
+
+
+## 2. Calculate the centroid distance by averaging "3" sublattices
+d_cent0 = np.average(R_A[:int(0.5*N_mol), 2] - R_A[int(0.5*N_mol): N_mol, 2])
+d_cent1 = np.average(R_B1[:int(0.5*N_mol), 2] - R_B1[int(0.5*N_mol): N_mol, 2])
+d_cent2 = np.average(R_B2[:int(0.5*N_mol), 2] - R_B2[int(0.5*N_mol): N_mol, 2])
+d_cent = -1*np.average([d_cent0, d_cent1, d_cent2])
+print("The centroid distance is", d_cent)
+#print("The centroid distance is", d_cent, file=open("logfile", "w"))
+
+## 3. Calculate the interlayer distance
+#d_gap = min(np.abs(np.average(R_B2[int(0.5*N_mol): N_mol, 2] - R_B1[:int(0.5*N_mol), 2])),\
+#        np.abs(np.average(R_B1[int(0.5*N_mol): N_mol, 2] - R_B2[:int(0.5*N_mol), 2])))
+d_gap = np.average(R_B1_up[:, 2]) - np.average(R_B2_down[:, 2])
+#d_edges = max(np.abs(np.average(R_B2[int(0.5*N_mol): N_mol, 2] - R_B1[:int(0.5*N_mol), 2])),\
+#        np.abs(np.average(R_B1[int(0.5*N_mol): N_mol, 2] - R_B2[:int(0.5*N_mol), 2])))
+d_edges = np.average(R_B2_up[:, 2]) - np.average(R_B1_down[:, 2])
+print("The interlayer distance of this structure is", d_gap)
+#print("The interlayer distance of this structure is", d_gap, file=open("logfile", "a"))
+
+sys.exit()
+############################
+## To generate shifted structures, ranging  from [-0.1A, d_gap*0.16]
+shifts = np.arange(-0.3, 0.15, 0.45/Number_of_shift)
+
+#print(shifts + d_gap)
+
+## To generate corresponding shifted POSCAR
+for i, ishift in enumerate(shifts):
+    ## Add shift to coordiante and create Strucutre objects
+    shift_per_group = np.vstack((np.tile([0, 0, -ishift*0.5], (int(0.5*N_mol), 1)), \
+        np.tile([0, 0, ishift*0.5], (int(0.5*N_mol), 1))))  ## The shifted distance in each sublattice 
+
+    shifted_CART = np.vstack((R_A + shift_per_group, R_B1 + shift_per_group,\
+        R_B2 + shift_per_group, R_CART[(n_per_type[0] + n_per_type[1]):] )) ## The coordinate after shifting.
+    interB = np.argsort(np.abs(shifted_CART[:, 2]- shifted_CART[-1,2]))[1: 1 + N_mol]
+    #for iB in interB:
+    #    print(shifted_CART[iB])
+
+    shifted_STRU = Structure(STRU.lattice.matrix,\
+                            STRU.atomic_numbers,\
+                            shifted_CART,\
+                            coords_are_cartesian=True,\
+                            to_unit_cell=True)
+    shifted_FRAC = shifted_STRU.frac_coords
+    N_ATOM = len(shifted_FRAC)
+    lattice = shifted_STRU.lattice.matrix
+
+    ## To generate string object for frac coordinate
+    FRAC_COORD_STRING = ""
+    for IATOM in range(N_ATOM):
+        #if IATOM in np.arange(n_per_type[0]) and\
+        #        np.linalg.norm((shifted_FRAC[index_ic] - shifted_FRAC[IATOM])[:2]) > 0.02: # x, y components are compared with the intercalated atom (Fe)
+        if IATOM in interB:
+            FRAC_COORD_STRING += f'{shifted_FRAC[IATOM, 0]:.16f} {shifted_FRAC[IATOM, 1]:.16f} {shifted_FRAC[IATOM, 2]:.16f} T T F  !{shifted_STRU.species[IATOM]}\n'
+            continue ## To fix certain A atoms parallel to perpendicular to Fe
+        FRAC_COORD_STRING += f'{shifted_FRAC[IATOM, 0]:.16f} {shifted_FRAC[IATOM, 1]:.16f} {shifted_FRAC[IATOM, 2]:.16f} T T T  !{shifted_STRU.species[IATOM]}\n'
+
+    ### To initial the subfolders ###
+    work_dir = os.path.join(pwd_dir, root_dir, str(d_gap + ishift))
+    os.makedirs(work_dir, exist_ok=True)
+    os.chdir(work_dir)
+
+    #### To output POSCAR ###
+    poscar = fr"""{types[0]}{n_per_type[0]}   {types[1]}{n_per_type[1]}   {types[2]}{n_per_type[2]}
+1.0
+{lattice[0, 0]:.16f} {lattice[0, 1]:.16f} {lattice[0, 2]:.16f}
+{lattice[1, 0]:.16f} {lattice[1, 1]:.16f} {lattice[1, 2]:.16f}
+{lattice[2, 0]:.16f} {lattice[2, 1]:.16f} {lattice[2, 2]:.16f}
+{types[0]} {types[1]} {types[2]}
+{n_per_type[0]} {n_per_type[1]} {n_per_type[2]}
+Direct
+{FRAC_COORD_STRING}"""
+    with open("POSCAR", "w") as f:
+        f.write(poscar)
+
+    ## To output remaining INPUTs: INCAR, KPOINTS, POTCAR ##
+    os.system(f"ln -s {pwd_dir}/POTCAR ./")
+    incar = fr"""start Parameters
+NWRITE     = 2      ! Medium-level information output
+INIWAV     = 0      ! Random initial wavefunction; otherwise
+ICORELEVEL = 1      ! Print core levels
+
+storage
+LWAVE = False         ! Write wavefunction
+
+nic relaxation
+PREC    = Normal  ! Precision level
+ALGO    = All      ! SCF minimisation algorithm; 38/48 combo
+ENCUT   = 500       ! Plane-wave cutoff
+NELM    = 200       ! Max SCF steps
+NELMIN  = 4         ! Min SCF steps
+EDIFF   = 1E-04     ! SCF energy convergence
+GGA     = PS        ! PBEsol exchange-correlation
+LASPH   = .TRUE.    ! Non-spherical elements; d/f convergence
+
+ionic relaxation
+EDIFFG = -0.001      ! Ionic convergence; eV/AA^3
+NSW = 0
+IBRION = -1         ! Algorithm: 0-MD; 1-Quasi-New; 2-CG
+ISIF   = 2        ! Stress/relaxation: 2-Ions, 3-Shape/Ions/V, 7-Vol
+ISMEAR = 0
+SIGMA = 0.2
+
+misc
+LORBIT  = 11        ! PAW radii for projected DOS
+LSORBIT = .TRUE.
+ISYM = -1
+
+magnetic
+  ISPIN   = 2         ! Enable spin polarisation
+  MAGMOM  = 72*0 0 0 6       ! Initial magnetic momoment on each ion
+
+dft+u
+  LDAU    = .TRUE.    ! Activate DFT+U
+  LDAUTYPE = 1         ! Dudarev; only U-J matters
+  LDAUL   = -1 -1 2      ! Orbitals for each species
+  LDAUU   = 0  0  4.0      ! on-site repulsion on Fe d orbital
+  LDAUJ   = 0  0  0.7      ! exchange interaction on Fe d orbital
+  LMAXMIX = 4         ! Mixing cut-off; 4-d, 6-f
+
+"""
+    with open("INCAR", "w") as f:
+        f.write(incar)
+
+
+    kpoints = fr"""Automatic mesh generation
+0
+Gamma
+6 6 1
+0 0 0
+"""
+    with open("KPOINTS", "w") as f:
+        f.write(kpoints)
+
+sys.exit()
+##### To generate strained structure ###
+
+root_dir = 'strained_configuration'
+os.makedirs(root_dir, exist_ok=True)
+strain_coefficient = np.arange(0, 0.02, 0.02/10)+0.02/10
+lattice = STRU.lattice.matrix
+for i, istrain in enumerate(strain_coefficient):
+    work_dir = os.path.join(pwd_dir, root_dir, str(i))
+    os.makedirs(work_dir, exist_ok=True)
+    os.chdir(work_dir)
+    strain_matrix = np.diag([istrain+1, istrain+1, 1])
+    strained_STRU = Structure(strain_matrix.dot(lattice),\
+                            STRU.atomic_numbers,\
+                            R_CART,\
+                            coords_are_cartesian=True,\
+                            to_unit_cell=True)
+    strained_STRU.to("POSCAR", "POSCAR")
+    ## To output remaining INPUTs: INCAR, KPOINTS, POTCAR ##
+    os.system(f"ln -s {pwd_dir}/POTCAR ./")
+    incar = fr"""start Parameters
+NWRITE     = 2      ! Medium-level information output
+INIWAV     = 0      ! Random initial wavefunction; otherwise
+ICORELEVEL = 1      ! Print core levels
+
+storage
+LWAVE = False         ! Write wavefunction
+
+nic relaxation
+PREC    = Normal  ! Precision level
+ALGO    = All      ! SCF minimisation algorithm; 38/48 combo
+ENCUT   = 500       ! Plane-wave cutoff
+NELM    = 200       ! Max SCF steps
+NELMIN  = 4         ! Min SCF steps
+EDIFF   = 1E-04     ! SCF energy convergence
+GGA     = PS        ! PBEsol exchange-correlation
+LASPH   = .TRUE.    ! Non-spherical elements; d/f convergence
+
+ionic relaxation
+EDIFFG = -0.001      ! Ionic convergence; eV/AA^3
+NSW = 0
+IBRION = -1         ! Algorithm: 0-MD; 1-Quasi-New; 2-CG
+ISIF   = 2        ! Stress/relaxation: 2-Ions, 3-Shape/Ions/V, 7-Vol
+ISMEAR = 0
+SIGMA = 0.2
+
+misc
+LORBIT  = 11        ! PAW radii for projected DOS
+LSORBIT = .TRUE.
+ISYM = -1
+
+magnetic
+  ISPIN   = 2         ! Enable spin polarisation
+  MAGMOM  = 72*0 0 0 6       ! Initial magnetic momoment on each ion
+
+dft+u
+  LDAU    = .TRUE.    ! Activate DFT+U
+  LDAUTYPE = 1         ! Dudarev; only U-J matters
+  LDAUL   = -1 -1 2      ! Orbitals for each species
+  LDAUU   = 0  0  4.0      ! on-site repulsion on Fe d orbital
+  LDAUJ   = 0  0  0.7      ! exchange interaction on Fe d orbital
+  LMAXMIX = 4         ! Mixing cut-off; 4-d, 6-f
+
+"""
+    with open("INCAR", "w") as f:
+        f.write(incar)
+
+
+    kpoints = fr"""Automatic mesh generation
+0
+Gamma
+6 6 1
+0 0 0
+"""
+    with open("KPOINTS", "w") as f:
+        f.write(kpoints)
+
+

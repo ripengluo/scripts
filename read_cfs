@@ -1,0 +1,58 @@
+#!/global/home/users/luorp/.conda/envs/abacus_env/bin/python
+import numpy as np
+import sys
+
+#Ef = -1.86941164 
+with open("DOSCAR", "r") as f:
+    text = f.readline()
+    text = f.readline()
+    text = f.readline()
+    text = f.readline()
+    text = f.readline()
+    Ef = f.readlines()[0].split()[3]
+Ef = float(Ef)
+print("Ef is: ", Ef)
+Fe_idx = 25
+gamma = False
+nbands = 0
+en = []
+occ = []
+proj = []
+with open("PROCAR", "r") as f:
+    for line in f:
+        words = line.split()
+        if "# of bands:" in line: 
+            nbands = int(words[7])
+        if "k-point" in words:
+            if words[1] == "1":
+                gamma = True
+            else:
+                gamma = False
+        if gamma and len(words):
+            if "energy" in line:
+                en.append(float(words[4]))
+                occ.append(float(words[7]))
+            if words[0] == "25":
+                proj.append(list(map(float, words[5:10])))
+
+en = np.array(en) - Ef
+proj = np.array(proj).reshape([nbands, 4, 5])[:, 3, :]
+
+print("energy", "dxy    dyz    dz2    dxz  x2-y2")
+for i in range(nbands):
+    print(en[i], "  ".join([str(w) for w in proj[i, :]]))
+
+sys.exit()
+for m in range(5):
+    sum_up = 0
+    sum_dn = 0
+    w_up = 0
+    w_dn = 0
+    for i in range(nbands):
+        if proj[i, m] > 0:
+            sum_up += proj[i, m]*en[i]
+            w_up += proj[i, m]
+        else:
+            sum_dn += proj[i, m]*en[i]
+            w_dn += proj[i, m]
+    print(m+1, sum_up/w_up, sum_dn/w_dn)

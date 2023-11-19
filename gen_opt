@@ -1,0 +1,22 @@
+#!/bin/bash
+
+PWD0=`pwd`
+LRU_dir=$1
+if [ ${#LRU_dir} -gt 1 ] ; then echo "pick U from" $LRU_dir;
+else echo "please input LRU file"; exit; fi
+cd $LRU_dir/1_1_1/
+PWD1=`pwd`
+U=`python get_U.py | cut -c -5`
+temp_dir=~/project_2D_magnetism/template_files
+cd $PWD0
+
+num_ite=`ls | grep opt_ |  wc -l`
+echo $num_ite
+cp -r $temp_dir/opt_U ./opt_U$num_ite
+cd ./opt_U$num_ite
+ln -s $PWD0/POSCAR ./POSCAR
+ln -s ../POTCAR ./
+sed -i "s/uvalue/$U/g" INCAR
+
+mv sub.sh_etna sub.sh; rm sub.sh_cm
+

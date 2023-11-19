@@ -1,0 +1,24 @@
+#!/global/home/users/luorp/.conda/envs/abacus_env/bin/python
+
+import numpy as np
+
+
+with open("POSCAR", "r") as f:
+    for i in range(5):
+        f.readline()
+    elements = f.readlines()[0].split()
+
+data = []
+with open("ACF.dat", "r") as f:
+    for line in f:
+        words = line.split()
+        if words[0].isdigit():
+            data.append(float(words[4]))
+
+Ta = np.average(data[:8])
+S = np.average(data[8:24])
+Fe = np.average(data[24])
+
+print("%s:  %.6f\n"%(elements[0], Ta), "%s:  %.6f\n"%(elements[1], S), "%s:  %.6f"%(elements[2], Fe))
+print(Ta, S, Fe)
+
